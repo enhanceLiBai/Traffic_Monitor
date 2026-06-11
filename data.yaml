@@ -1,9 +1,9 @@
-# 训练集和验证集的图片路径
-train: /root/autodl-tmp/FlowPlate-Analyzer/data/train
-val: /root/autodl-tmp/FlowPlate-Analyzer/data/val
-test: /root/autodl-tmp/FlowPlate-Analyzer/data/test
+# 训练集、验证集和测试集的图片路径（相对路径，支持本地和远程部署）
+train: ./data/train
+val: ./data/val
+test: ./data/test
 
-# 类别数量（车牌检测我们只分 1 类：车牌）
+# 类别数量（车牌检测只分 1 类：车牌）
 nc: 1
 
 # 类别名称

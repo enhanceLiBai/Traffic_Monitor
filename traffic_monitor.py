@@ -33,11 +33,30 @@ print("="*50)
 model = YOLO("yolov8m.pt")
 
 
-# 如果导出了 best.onnx，这里可以换成 my_plate_detector = YOLO("./runs/detect/.../best.onnx")
+# 车牌检测模型（支持 .pt 和 .onnx 两种格式）
+# 使用 ONNX 格式可获得更快的推理速度，详见部署文档第 4.6 节 ONNX 导出指南
 my_plate_detector = YOLO("./best.onnx") 
 hy_recognizer = lpr.LicensePlateCatcher()
 
-FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+# 中文字体路径自动探测（跨平台兼容）
+_FONT_CANDIDATES = [
+    # Linux: Wqy-Zenhei（文档推荐，apt-get install fonts-wqy-zenhei）
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    # Linux: Noto CJK（部分发行版默认）
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    # Windows 系统自带中文字体
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+]
+FONT_PATH = None
+for _fp in _FONT_CANDIDATES:
+    if os.path.exists(_fp):
+        FONT_PATH = _fp
+        print(f"🔤 检测到中文字体: {_fp}")
+        break
+if FONT_PATH is None:
+    print("⚠️ 未找到中文字体！车牌中文渲染将降级为英文显示（Linux 请执行: apt-get install fonts-wqy-zenhei）")
 
 # 📊 识别率统计指标
 total_captured_vehicles = 0   # 总抓拍车位数

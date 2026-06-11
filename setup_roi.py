@@ -6,10 +6,13 @@ import paramiko  # 用于远程连接服务器
 from tkinter import filedialog, Tk  
 
 # ==================== 🖥️ 远程服务器配置区 (已针对 AutoDL 深度优化) ====================
-SERVER_IP = "connect.nmb1.seetacloud.com"       
-SERVER_PORT = 10743                   
-SERVER_USER = "root"               
-SERVER_PASS = "HiLByf5R2dUi"      
+SERVER_IP = "connect.nmb1.seetacloud.com"
+SERVER_PORT = 10743
+SERVER_USER = "root"
+# ⚠️ 优先从环境变量读取密码，避免明文泄露。设置方式：
+#    Linux/macOS: export AUTODL_PASS="你的密码"
+#    Windows PS:  $env:AUTODL_PASS="你的密码"
+SERVER_PASS = os.environ.get("AUTODL_PASS", "")      
 
 SERVER_PROJECT_DIR = "/root/autodl-tmp/FlowPlate-Analyzer"
 SERVER_PYTHON_ENV = "python"   
@@ -150,7 +153,14 @@ def get_location(event, x, y, flags, param):
 
 def main():
     global frame_setup, VIDEO_PATH
-    
+
+    if not SERVER_PASS:
+        print("⚠️ 警告：未设置服务器密码（环境变量 AUTODL_PASS 为空）")
+        print("   远程部署功能将不可用。如需使用，请在终端中设置密码后重试：")
+        print("   Linux/macOS: export AUTODL_PASS=\"你的密码\"")
+        print("   Windows PS:  $env:AUTODL_PASS=\"你的密码\"")
+        print("   或在 setup_roi.py 中直接填写 SERVER_PASS = \"你的密码\"\n")
+
     # 💡 核心改动：移到 main 内部执行，只有运行 main 才会触发弹窗
     VIDEO_PATH = select_local_video()
 

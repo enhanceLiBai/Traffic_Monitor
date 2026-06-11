@@ -11,6 +11,7 @@
 5. [本地部署运行](#5-本地部署运行)
 6. [远程服务器部署（AutoDL）](#6-远程服务器部署autodl)
 7. [常见问题排查](#7-常见问题排查)
+8. [Linux 生产环境部署（systemd）](#8-linux-生产环境部署systemd-服务)
 
 ---
 
@@ -51,13 +52,16 @@
 
 | 文件 | 用途 |
 |---|---|
-| `traffic_plate_counter.py` | 🚀 系统主程序，一键运行 |
+| `traffic_monitor.py` | 🚀 系统主程序，一键运行 |
 | `setup_roi.py` | 激光线配置 + 远程服务器一键部署 |
+| `setup_roi_local.py` | 激光线配置 + 本地一键部署运行 |
 | `dataset_tools/train.py` | YOLO 车牌检测模型训练脚本 |
 | `dataset_tools/ccpd_to_yolo.py` | CCPD 数据集 → YOLO 格式转换 |
 | `dataset_tools/split_dataset.py` | 数据集 8:1:1 划分 |
 | `data.yaml` | 训练数据路径与类别配置 |
 | `config.json` | 视频路径与激光线坐标配置 |
+| `best.onnx` | 自训练车牌检测模型（ONNX 格式，用于推理加速） |
+| `yolov8m.pt` | YOLOv8m 车辆检测预训练权重 |
 
 ---
 
@@ -108,7 +112,44 @@ Linux 容器/server 默认无中文字体，**必须执行**：
 apt-get update && apt-get install -y fonts-wqy-zenhei
 ```
 
-> Windows 系统内置中文字体，无需此步骤。
+程序启动时自动探测字体路径（按 Wqy-Zenhei → Noto CJK → 系统字体顺序），无需手动配置 `FONT_PATH`。
+
+> Windows 系统内置中文字体（SimHei / 微软雅黑），程序自动识别，无需此步骤。
+
+### 2.5 CUDA 环境安装指南（GPU 用户）
+
+使用 NVIDIA 显卡进行训练/推理需安装 CUDA 工具包。
+
+**Step 1 — 验证显卡驱动：**
+```bash
+nvidia-smi
+```
+确保驱动版本 ≥ 525.x，输出中 `CUDA Version` 显示 11.8 或更高。
+
+**Step 2 — 版本兼容性对照表：**
+
+| PyTorch 版本 | CUDA 版本 | cuDNN |
+|---|---|---|
+| 2.0.x | 11.8 | 8.7+ |
+| 2.1.x | 12.1 | 8.9+ |
+| 2.2.x+ | 12.1 / 12.4 | 9.0+ |
+
+> `ultralytics` 依赖 PyTorch，安装时会自动拉取匹配的 CUDA 版本，通常无需手动安装 CUDA Toolkit。若 `nvidia-smi` 正常但 `torch.cuda.is_available()` 返回 `False`，请根据 PyTorch 官网指南重新安装对应 CUDA 版本的 PyTorch。
+
+**Step 3 — 验证 GPU 可用性：**
+```bash
+python -c "import torch; print(f'CUDA Available: {torch.cuda.is_available()}'); print(f'Device: {torch.cuda.get_device_name(0)}')"
+```
+
+### 2.6 依赖分环境说明
+
+`requirements.txt` 默认包含 `onnxruntime-gpu`（GPU 推理）。CPU 用户请手动替换：
+
+```bash
+# CPU 环境：先卸载 GPU 版，再安装 CPU 版
+pip uninstall onnxruntime-gpu -y
+pip install onnxruntime>=1.18.0
+```
 
 ---
 
@@ -200,16 +241,16 @@ names:
 
 ```python
 model.train(
-    data="data.yaml",       # 数据集配置文件
-    epochs=100,             # 训练轮数（50~100 轮通常收敛）
-    imgsz=640,              # 输入尺寸
-    batch=16,               # 批大小（大显存卡可调至 32/64）
-    workers=8,              # 数据加载线程数
-    device=0,               # GPU 编号（CPU 训练设为 "cpu"）
-    optimizer="SGD",        # 优化器（可选 "AdamW"）
-    project="runs/detect",  # 输出根目录
-    name="flow_plate_m",    # 实验名称
-    plots=True,             # 生成训练曲线图
+    data="data.yaml",        # 数据集配置文件（相对路径）
+    epochs=100,              # 训练轮数（50~100 轮通常收敛）
+    imgsz=640,               # 输入尺寸
+    batch=16,                # 批大小（大显存卡可调至 32/64）
+    workers=8,               # 数据加载线程数
+    device=0,                # GPU 编号（CPU 训练设为 "cpu"）
+    optimizer="SGD",         # 优化器（可选 "AdamW"）
+    project="runs",          # 输出根目录
+    name="flow_plate_m",     # 实验名称
+    plots=True,              # 生成训练曲线图
 )
 ```
 
@@ -217,17 +258,17 @@ model.train(
 
 ```bash
 # 1. 确保 yolov8m.pt 在项目根目录（首次运行会自动下载）
-# 2. 修改 train.py 中 data.yaml 的绝对路径为你的实际路径
+# 2. 确认 data.yaml 中的路径正确（默认为 ./data/train, ./data/val, ./data/test）
 # 3. 启动训练
 python dataset_tools/train.py
 ```
 
 ### 4.4 训练输出
 
-训练结束后，在 `runs/detect/flow_plate_m/` 下生成：
+训练结束后，在 `runs/flow_plate_m/` 下生成：
 
 ```
-runs/detect/flow_plate_m/
+runs/flow_plate_m/
 ├── weights/
 │   ├── best.pt          # 🌟 验证集上 mAP 最高的权重（部署用这个）
 │   └── last.pt          # 最后一轮的权重（用于断点续训）
@@ -246,7 +287,30 @@ runs/detect/flow_plate_m/
 | Precision | 精确率 | > 0.95 |
 | Recall | 召回率 | > 0.90 |
 
-### 4.6 关键超参数调优建议
+### 4.6 ONNX 模型导出（推理加速）⚡
+
+训练得到的 `best.pt` 可直接用于推理，但导出为 ONNX 格式可显著提升推理速度（通常加速 20%~40%）。
+
+```bash
+# 在项目根目录执行
+python -c "
+from ultralytics import YOLO
+model = YOLO('./runs/flow_plate_m/weights/best.pt')
+model.export(format='onnx', imgsz=640, simplify=True)
+print('✅ ONNX 导出完成: best.onnx')
+"
+```
+
+导出后的 `best.onnx` 放到项目根目录即可被 `traffic_monitor.py` 自动加载。
+
+| 格式 | 文件大小 | 推理速度 | 适用场景 |
+|---|---|---|---|
+| `best.pt` | ~20 MB | 基准 | 训练、验证、灵活性高 |
+| `best.onnx` | ~10 MB | 快 20%~40% | 生产推理部署 |
+
+> 💡 如果要在 `traffic_monitor.py` 中切换回 `.pt` 格式，修改 `my_plate_detector = YOLO("./runs/flow_plate_m/weights/best.pt")` 即可。
+
+### 4.7 关键超参数调优建议
 
 | 场景 | 建议 |
 |---|---|
@@ -262,14 +326,14 @@ runs/detect/flow_plate_m/
 ### 5.1 前置条件检查
 
 - [ ] `yolov8m.pt` 已下载（首次运行自动拉取）
-- [ ] `runs/detect/runs/detect/flow_plate_m/weights/best.pt` 存在（自训练权重）
+- [ ] `runs/flow_plate_m/weights/best.pt` 存在（自训练权重）
 - [ ] `data/traffic.mp4` 测试视频存在
 - [ ] 中文字体可用（Linux 需安装 `fonts-wqy-zenhei`）
 
 ### 5.2 方式一：直接运行主程序
 
 ```bash
-python traffic_plate_counter.py
+python traffic_monitor.py
 ```
 
 程序将自动完成以下步骤：
@@ -282,7 +346,24 @@ python traffic_plate_counter.py
 7. 生成 CSV 报表 `recognition_results.csv`
 8. 终端打印识别成功率统计
 
-### 5.3 方式二：通过 ROI 配置工具运行
+### 5.3 方式二：通过 ROI 配置工具运行（本地）
+
+```bash
+python setup_roi_local.py
+```
+
+**交互流程：**
+
+1. 弹出文件选择窗口 → 选择待检测视频
+2. 在视频首帧画面上**依次点击**：
+   - 左端点 A（激光线起点）
+   - 右端点 B（激光线终点）
+3. 按 `Enter` 确认划线，系统保存配置到 `config.json`
+4. 自动启动 `traffic_monitor.py` 进行检测
+
+> 💡 该脚本适合**纯本地运行**场景，不涉及任何远程连接。
+
+### 5.4 方式三：通过 ROI 配置工具运行（远程）
 
 ```bash
 python setup_roi.py
@@ -297,12 +378,24 @@ python setup_roi.py
 3. 系统自动保存配置到 `config.json`
 4. （可选）自动上传视频和配置到远程服务器
 
-### 5.4 关键参数修改指南
+> 详见第 6 节「远程服务器部署」。
 
-在 `traffic_plate_counter.py` 中可直接修改：
+### 5.5 config.json 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `video_path` | string | 待检测视频的绝对路径 |
+| `scale` | float | 画面缩放比例（0.5 = 缩小一半），降低计算量同时提升 FPS |
+| `line_a` | [int, int] | 激光线起点坐标（基于缩放后画面，由 setup_roi 工具生成） |
+| `line_b` | [int, int] | 激光线终点坐标（同上） |
+| `is_configured` | bool | 配置完成标志，`true` 表示已划线配置 |
+
+### 5.6 关键参数修改指南
+
+在 `traffic_monitor.py` 中可直接修改：
 
 ```python
-# 视频输入
+# 视频输入（也可通过 config.json 设置）
 video_path = "./data/traffic.mp4"   # 改为你的视频路径
 
 # 画面缩放（0.5 = 缩小一半，降低计算量）
@@ -319,7 +412,7 @@ max_dist=15
 ALLOWED_CLASSES = [2, 5, 7]
 ```
 
-### 5.5 输出文件说明
+### 5.7 输出文件说明
 
 | 输出文件 | 说明 |
 |---|---|
@@ -366,6 +459,13 @@ SERVER_PASS = "你的密码"                      # SSH 密码
 SERVER_PROJECT_DIR = "/root/autodl-tmp/FlowPlate-Analyzer"  # 项目根目录
 ```
 
+> ⚠️ **安全警告**：`SERVER_PASS` 以明文存储，**切勿**将含真实密码的 `setup_roi.py` 提交到 Git 仓库。推荐使用环境变量替代：
+> ```python
+> import os
+> SERVER_PASS = os.environ.get("AUTODL_PASS", "")
+> ```
+> 并在终端中设置：`export AUTODL_PASS="你的密码"`（Linux）/ `$env:AUTODL_PASS="你的密码"`（PowerShell）。
+
 ### 6.4 一键部署流程
 
 ```bash
@@ -379,7 +479,7 @@ python setup_roi.py
 2. 🖱️ 在视频首帧上画激光线
 3. 🔄 **SFTP 自动上传视频**到服务器 `data/` 目录
 4. 📋 **SFTP 自动同步配置** `config.json` 到服务器
-5. 🔥 **SSH 远程触发** `traffic_plate_counter.py` 后台运行
+5. 🔥 **SSH 远程触发** `traffic_monitor.py` 后台运行
 6. 📝 服务器推理日志写入 `detection.log`
 
 ### 6.5 手动远程运行
@@ -397,11 +497,47 @@ ssh -p 10743 root@your-server
 
 # 4. 后台运行（断开 SSH 不中断）
 cd /root/autodl-tmp/FlowPlate-Analyzer
-nohup python traffic_plate_counter.py > detection.log 2>&1 &
+nohup python traffic_monitor.py > detection.log 2>&1 &
 
 # 5. 查看日志
 tail -f detection.log
 ```
+
+### 6.6 Docker 容器部署（可选）
+
+创建 `Dockerfile`：
+
+```dockerfile
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+
+RUN apt-get update && apt-get install -y \
+    fonts-wqy-zenhei \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+COPY . .
+
+ENV QT_QPA_PLATFORM=offscreen
+
+CMD ["python", "traffic_monitor.py"]
+```
+
+构建与运行：
+
+```bash
+# 构建镜像（需提前将 best.onnx, yolov8m.pt, 视频文件放入项目目录）
+docker build -t traffic-monitor .
+
+# 运行容器
+docker run --gpus all -v $(pwd)/data:/app/data -v $(pwd)/output:/app traffic-monitor
+```
+
+> 输出文件 `yolo_hy_plate_result.mp4` 和 `recognition_results.csv` 将保存在宿主机的 `./output/` 目录。
 
 ---
 
@@ -414,17 +550,14 @@ tail -f detection.log
 ```bash
 apt-get update && apt-get install -y fonts-wqy-zenhei
 ```
-然后修改 `traffic_plate_counter.py` 中的 `FONT_PATH`：
-```python
-FONT_PATH = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
-```
+程序启动时会自动探测系统中可用的中文字体（按优先级依次尝试 Wqy-Zenhei → Noto CJK → Windows 系统字体），无需手动修改代码中的 `FONT_PATH`。若自动探测失败，终端会打印字体安装提示。
 
 ### 7.2 CUDA Out of Memory
 
 **原因**: 显存不足  
 **解决**:
 - 降低 `SCALE` 值（如 0.3）
-- 在 `traffic_plate_counter.py` 中设置 `device='cpu'`（牺牲速度保功能）
+- 在 `traffic_monitor.py` 中设置 `device='cpu'`（牺牲速度保功能）
 
 ### 7.3 车牌识别率低
 
@@ -432,7 +565,7 @@ FONT_PATH = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
 
 | 原因 | 排查方法 | 解决方案 |
 |---|---|---|
-| 车牌检测模型未收敛 | 查看 `runs/detect/flow_plate_m/results.png` | 增加 epochs 或调整学习率 |
+| 车牌检测模型未收敛 | 查看 `runs/flow_plate_m/results.png` | 增加 epochs 或调整学习率 |
 | 激光线位置不佳 | 检查 `debug_capture/` 中抓拍的车身裁剪图 | 用 `setup_roi.py` 重新划线 |
 | 视频分辨率过低 | 检查原始视频分辨率 | 确保输入视频 ≥ 1080p |
 | 极端角度/遮挡 | 查看 FAILED 案例 | 补充训练数据覆盖 Corner Cases |
@@ -451,7 +584,7 @@ cat ./data/train/XXXXX.txt  # 应看到类似 "0 0.5234 0.6123 0.0891 0.0342"
 
 **调试方法**:
 - 增大 `max_dist`（默认 15px）降低触发门槛
-- 在 `traffic_plate_counter.py` 中输出 `cx`, `cy` 观察车辆中心点轨迹
+- 在 `traffic_monitor.py` 中输出 `cx`, `cy` 观察车辆中心点轨迹
 - 确保激光线横跨车道，不要平行于车流方向
 
 ### 7.6 OpenCV 窗口无法关闭 / 程序卡死
@@ -463,6 +596,102 @@ taskkill /F /IM python.exe
 
 # Linux:
 pkill -9 python
+```
+
+### 7.7 GPU 不可用 / CUDA 错误
+
+**症状**: 推理极慢（< 5 FPS）或报 `CUDA not available`  
+**排查步骤**:
+
+```bash
+# 1. 检查驱动
+nvidia-smi
+
+# 2. 检查 PyTorch CUDA
+python -c "import torch; print(torch.cuda.is_available())"
+
+# 3. 检查 ONNX Runtime 是否识别 GPU
+python -c "import onnxruntime; print(onnxruntime.get_device())"
+```
+
+**常见解决方案**:
+
+| 症状 | 方案 |
+|---|---|
+| `nvidia-smi` 正常但 `torch.cuda.is_available()` 为 False | PyTorch 版本与 CUDA 不匹配，重新安装对应版本 |
+| ONNX Runtime 使用 CPU | 安装 `onnxruntime-gpu` 替代 `onnxruntime` |
+| 显存不足 | 降低 `SCALE` 至 0.3，或改用 CPU 推理 |
+
+### 7.8 远程部署连接失败
+
+**症状**: `setup_roi.py` 无法连接远程服务器  
+**排查**:
+- 确认 AutoDL 实例已开机且 SSH 端口正确（AutoDL 控制台可查）
+- 检查本地防火墙是否阻止出站连接
+- 尝试手动 SSH 登录验证凭证：`ssh -p <PORT> root@<IP>`
+
+### 7.9 训练后项目目录清理
+
+训练过程中产生的冗余文件建议清理以保持仓库整洁：
+
+```bash
+# 删除 Jupyter Notebook 检查点缓存（已在 .gitignore 中）
+find . -type d -name ".ipynb_checkpoints" -exec rm -rf {} +
+
+# 如果训练输出路径有嵌套重复（如 runs/detect/runs/detect/），可清理后重新训练
+# 新版本 train.py 已将 project 改为 "runs"，不会产生嵌套问题
+```
+
+---
+
+## 8. Linux 生产环境部署（systemd 服务）
+
+将 `traffic_monitor.py` 注册为系统服务，实现开机自启动和崩溃自动重启。
+
+### 8.1 创建服务文件
+
+```bash
+sudo nano /etc/systemd/system/traffic-monitor.service
+```
+
+填入以下内容（请替换路径为实际路径）：
+
+```ini
+[Unit]
+Description=Smart Traffic Monitor - Plate Recognition
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/autodl-tmp/FlowPlate-Analyzer
+ExecStart=/usr/bin/python3 /root/autodl-tmp/FlowPlate-Analyzer/traffic_monitor.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/root/autodl-tmp/FlowPlate-Analyzer/detection.log
+StandardError=append:/root/autodl-tmp/FlowPlate-Analyzer/detection.log
+Environment="QT_QPA_PLATFORM=offscreen"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 8.2 启用与管理
+
+```bash
+# 重载配置
+sudo systemctl daemon-reload
+
+# 启动服务
+sudo systemctl start traffic-monitor
+
+# 设置开机自启
+sudo systemctl enable traffic-monitor
+
+# 查看运行状态
+sudo systemctl status traffic-monitor
+
+# 查看日志
+journalctl -u traffic-monitor -f
 ```
 
 ---
@@ -487,8 +716,9 @@ pkill -9 python
 │     └── python train.py             (训练 ~100 epochs)           │
 │                                                                 │
 │  4. 部署推理                                                     │
-│     ├── [本地] python traffic_plate_counter.py                  │
-│     └── [远程] python setup_roi.py → 画线 → 自动上传+运行         │
+│     ├── [本地-直接] python traffic_monitor.py                     │
+│     ├── [本地-可视] python setup_roi_local.py → 画线 → 自动运行    │
+│     └── [远程部署] python setup_roi.py → 画线 → 自动上传+运行      │
 │                                                                 │
 │  5. 结果输出                                                     │
 │     ├── yolo_hy_plate_result.mp4   (渲染视频)                    │
