@@ -159,8 +159,8 @@ pip install onnxruntime>=1.18.0
 
 ### 3.1 数据集下载
 
-- **CCPD2019**: [GitHub - detectRecog/CCPD](https://github.com/detectRecog/CCPD)
-- **CCPD2020**: 同上仓库的补充数据集
+- **CCPD 中文车牌数据集**: [百度 AI Studio](https://aistudio.baidu.com/datasetdetail/101620)
+- 原始项目: [GitHub - detectRecog/CCPD](https://github.com/detectRecog/CCPD)
 - 推荐使用 `ccpd_base` 子集（约 20 万张），在精度与训练时间之间取得较好平衡
 
 ### 3.2 数据集划分 (8:1:1)
