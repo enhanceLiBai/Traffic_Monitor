@@ -1,0 +1,11 @@
+# 训练集和验证集的图片路径
+train: /root/autodl-tmp/FlowPlate-Analyzer/data/train
+val: /root/autodl-tmp/FlowPlate-Analyzer/data/val
+test: /root/autodl-tmp/FlowPlate-Analyzer/data/test
+
+# 类别数量（车牌检测我们只分 1 类：车牌）
+nc: 1
+
+# 类别名称
+names:
+  0: license_plate

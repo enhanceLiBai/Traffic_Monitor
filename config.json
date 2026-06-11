@@ -1,0 +1,13 @@
+{
+    "video_path": "/root/autodl-tmp/FlowPlate-Analyzer/data/output_000.mp4",
+    "scale": 0.5,
+    "line_a": [
+        310,
+        529
+    ],
+    "line_b": [
+        1534,
+        497
+    ],
+    "is_configured": true
+}
